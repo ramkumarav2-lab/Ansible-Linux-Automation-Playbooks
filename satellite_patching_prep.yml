@@ -1,0 +1,83 @@
+---
+- name: Satellite Registration & Patching Pre-check
+  hosts: all
+  become: yes
+  gather_facts: yes
+
+  vars:
+    satellite_fqdn: satellite.example.com
+    satellite_ip: 192.168.10.50
+    org_name: MY_ORG
+
+    activation_keys:
+      "7": RHEL7-ACT-KEY
+      "8": RHEL8-ACT-KEY
+      "9": RHEL9-ACT-KEY
+
+    old_rpms:
+      - katello-ca-consumer*
+      - redhat-release*
+
+    required_rpms:
+      - yum-utils
+      - subscription-manager
+
+  tasks:
+
+  - name: Check Satellite connectivity
+    ping:
+      data: "Satellite Reachable"
+    delegate_to: "{{ satellite_fqdn }}"
+    ignore_errors: yes
+
+  - name: Add Satellite entry to /etc/hosts
+    lineinfile:
+      path: /etc/hosts
+      line: "{{ satellite_ip }} {{ satellite_fqdn }}"
+      state: present
+
+  - name: Remove old RPMs
+    yum:
+      name: "{{ old_rpms }}"
+      state: absent
+    ignore_errors: yes
+
+  - name: Install required RPMs
+    yum:
+      name: "{{ required_rpms }}"
+      state: present
+
+  - name: Clean subscription manager
+    command: subscription-manager clean
+    ignore_errors: yes
+
+  - name: Register system to Satellite
+    command: >
+      subscription-manager register
+      --org="{{ org_name }}"
+      --activationkey="{{ activation_keys[ansible_distribution_major_version] }}"
+      --force
+    register: register_output
+
+  - name: Display registration output
+    debug:
+      var: register_output.stdout
+
+  - name: Refresh subscription
+    command: subscription-manager refresh
+
+  - name: List enabled repositories
+    command: subscription-manager repos --list-enabled
+    register: repos_output
+
+  - name: Show enabled repos
+    debug:
+      var: repos_output.stdout_lines
+
+  - name: Check latest available kernel version
+    command: yum list available kernel
+    register: kernel_output
+
+  - name: Display latest kernel version
+    debug:
+      msg: "{{ kernel_output.stdout_lines }}"
